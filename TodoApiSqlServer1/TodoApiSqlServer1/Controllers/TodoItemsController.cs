@@ -33,6 +33,7 @@ namespace TodoApiSqlServer.Controllers
                             model.id = (int)reader["id"];
                             model.product = (string)reader["product"];
                             model.price = (double)reader["price"];
+                            model.quantity = (int)reader["quantity"];
                             itemmodels.Add(model);
                         }
                     }
@@ -60,6 +61,7 @@ namespace TodoApiSqlServer.Controllers
                         id = reader.GetInt32(0),
                         product = reader.GetString(1),
                         price = reader.GetDouble(2),
+                        quantity = reader.GetInt32(0)
                     };
                     return item;
                 }
@@ -71,26 +73,30 @@ namespace TodoApiSqlServer.Controllers
         [HttpPost]
         public Itemmodel AddItem(Itemmodel model)
         {
-            try
+            using (SqlConnection connection = new SqlConnection(connectionString))
             {
-                using (SqlConnection connection = new SqlConnection(connectionString))
+                connection.Open();
+                SqlTransaction transaction = connection.BeginTransaction();
+                try
                 {
-                    connection.Open();
-                    using (SqlCommand command = new SqlCommand("AddProduct", connection))
+                    using (SqlCommand command = new SqlCommand("AddProduct", connection, transaction))
                     {
                         command.CommandType = CommandType.StoredProcedure;
-                        command.Parameters.AddWithValue("@id", model.id);
                         command.Parameters.AddWithValue("@product", model.product);
                         command.Parameters.AddWithValue("@price", model.price);
+                        command.Parameters.AddWithValue("@quantity", model.quantity);
                         command.ExecuteNonQuery();
                     }
+                    transaction.Commit();
                     connection.Close();
+                    return model;
                 }
-                return model;
-            }
-            catch 
-            {
-                return null!;
+                catch
+                {
+                    transaction.Rollback();
+                    connection.Close();
+                    return null!;
+                }
             }
         }
 
@@ -99,22 +105,35 @@ namespace TodoApiSqlServer.Controllers
         {
             using (SqlConnection connection = new SqlConnection(connectionString))
             {
-                connection.Open();              
-                using (SqlCommand command = new SqlCommand("UpdateProduct", connection))
+                connection.Open();
+                using (SqlTransaction transaction = connection.BeginTransaction())
                 {
-                    command.CommandType = CommandType.StoredProcedure;
-                    command.Parameters.AddWithValue("@id", id);
-                    command.Parameters.AddWithValue("@product", model.product);
-                    command.Parameters.AddWithValue("@price", model.price); 
-                    int rows = command.ExecuteNonQuery();
-                    if (rows == 0)
+                    try
                     {
+                        using (SqlCommand command = new SqlCommand("UpdateProduct", connection, transaction))
+                        {
+                            command.CommandType = CommandType.StoredProcedure;
+                            command.Parameters.AddWithValue("@id", id);
+                            command.Parameters.AddWithValue("@product", model.product);
+                            command.Parameters.AddWithValue("@price", model.price);
+                            command.Parameters.AddWithValue("@quantity", model.quantity);
+                            int rows = command.ExecuteNonQuery();
+                            if (rows == 0)
+                            {
+                                transaction.Rollback();
+                                return null!;
+                            }
+                        }
+                        transaction.Commit();
+                        return model;
+                    }
+                    catch
+                    {
+                        transaction.Rollback();
                         return null!;
                     }
                 }
-                connection.Close();
             }
-            return model;
         }
 
         [HttpDelete("{id}")]
